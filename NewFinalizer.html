@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta name="description" content="AI-powered financial statement analyzer with PDF extraction and OCR">
+    <title>FinAlizer - Advanced Financial Analysis Platform</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+    <script src="./fin_utils.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #00d4ff;
+            --secondary: #0099cc;
+            --accent: #ff006e;
+            --dark-bg: #0a0e27;
+            --card-bg: #1a1f3a;
+            --card-border: #2a3f5f;
+            --text-primary: #e0e6ff;
+            --text-secondary: #a8afc7;
+            --success: #00d084;
+            --warning: #ffa500;
+            --danger: #ff4757;
+        }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, var(--dark-bg) 0%, #0f1535 50%, #1a0f35 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: var(--text-primary);
+            position: relative;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 50%, rgba(0, 212, 255, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            animation: drift 20s linear infinite;
+            z-index: 0;
+        }
+        @keyframes drift { 0% { transform: translate(0, 0); } 100% { transform: translate(50px, 50px); } }
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 25px;
+            box-shadow: 0 0 60px rgba(0, 212, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+            border: 1px solid var(--card-border);
+            backdrop-filter: blur(10px);
+            position: relative;
+            z-index: 1;
+        }
+        .header {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(255, 0, 110, 0.05) 100%);
+            color: var(--text-primary);
+            padding: 60px 40px;
+            text-align: center;
+            border-bottom: 1px solid var(--card-border);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+        }
+        .header h1 {
+            font-size: 3.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 800;
+            letter-spacing: -1px;
+        }
+        .header p {
+            opacity: 0.8;
+            font-size: 1.1em;
+            color: var(--text-secondary);
+        }
+        .badge {
+            display: inline-block;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            padding: 8px 20px;
+            border-radius: 50px;
+            margin-top: 15px;
+            font-size: 0.85em;
+            font-weight: 600;
+            color: var(--dark-bg);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(0, 0, 0, 0.2);
+            overflow-x: auto;
+        }
+        .tab {
+            flex: 1;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 1.05em;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            min-width: 130px;
+            white-space: nowrap;
+        }
+        .tab::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            transform: scaleX(0);
+            transform-origin: center;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .tab:hover {
+            color: var(--primary);
+            background: rgba(0, 212, 255, 0.05);
+        }
+        .tab.active {
+            color: var(--primary);
+        }
+        .tab.active::after {
+            transform: scaleX(1);
+        }
+        .tab.disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .content {
+            padding: 50px 40px;
+            min-height: 500px;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: slideInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        @keyframes slideInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .upload-area {
+            border: 2px dashed var(--primary);
+            border-radius: 20px;
+            padding: 80px 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(255, 0, 110, 0.02) 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        .upload-area::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.1), transparent);
+            transition: left 0.5s;
+        }
+        .upload-area:hover {
+            border-color: var(--secondary);
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(255, 0, 110, 0.05) 100%);
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.2);
+        }
+        .upload-area:hover::before {
+            left: 100%;
+        }
+        .upload-area h2 { font-size: 1.8em; margin-bottom: 15px; }
+        .upload-area svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 30px;
+            color: var(--primary);
+            filter: drop-shadow(0 0 10px rgba(0, 212, 255, 0.3));
+            transition: transform 0.3s;
+        }
+        .upload-area:hover svg { transform: scale(1.1) translateY(-5px); }
+        .btn {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: var(--dark-bg);
+            border: none;
+            padding: 14px 35px;
+            border-radius: 30px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0, 212, 255, 0.4); }
+        .btn:hover::before { width: 300px; height: 300px; }
+        .btn:active { transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn.secondary {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.2) 0%, rgba(255, 0, 110, 0.2) 100%);
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+        }
+        .loading { text-align: center; padding: 60px 40px; }
+        .spinner {
+            border: 3px solid rgba(0, 212, 255, 0.1);
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 25px; margin-top: 30px; }
+        .data-card {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(255, 0, 110, 0.02) 100%);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(5px);
+        }
+        .data-card:hover {
+            box-shadow: 0 0 40px rgba(0, 212, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            transform: translateY(-5px);
+            border-color: var(--primary);
+        }
+        .data-card h3 {
+            color: var(--primary);
+            margin-bottom: 25px;
+            font-size: 1.3em;
+            border-bottom: 2px solid var(--card-border);
+            padding-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+            color: var(--text-secondary);
+        }
+        .data-row:last-child { border-bottom: none; }
+        .data-row strong {
+            color: var(--primary);
+            font-weight: 600;
+        }
+        .ratio-card {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(255, 0, 110, 0.02) 100%);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.08);
+            border: 1px solid var(--card-border);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .ratio-card:hover { box-shadow: 0 0 30px rgba(0, 212, 255, 0.12); transform: translateX(5px); }
+        .ratio-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .ratio-header span:first-child { color: var(--text-secondary); font-weight: 600; font-size: 1.05em; }
+        .ratio-value {
+            font-size: 1.6em;
+            font-weight: 800;
+            font-family: 'Courier New', monospace;
+        }
+        .ratio-value.good { color: var(--success); text-shadow: 0 0 10px rgba(0, 208, 132, 0.5); }
+        .ratio-value.warning { color: var(--warning); text-shadow: 0 0 10px rgba(255, 165, 0, 0.5); }
+        .ratio-value.bad { color: var(--danger); text-shadow: 0 0 10px rgba(255, 71, 87, 0.5); }
+        .progress-bar {
+            height: 10px;
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 12px;
+            border: 1px solid var(--card-border);
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+        }
+        .insight-box {
+            background: linear-gradient(135deg, rgba(0, 208, 132, 0.1) 0%, rgba(0, 208, 132, 0.05) 100%);
+            border-left: 4px solid var(--success);
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 15px;
+            border: 1px solid var(--card-border);
+        }
+        .insight-box.warning {
+            background: linear-gradient(135deg, rgba(255, 165, 0, 0.1) 0%, rgba(255, 165, 0, 0.05) 100%);
+            border-left-color: var(--warning);
+        }
+        .insight-box.danger {
+            background: linear-gradient(135deg, rgba(255, 71, 87, 0.1) 0%, rgba(255, 71, 87, 0.05) 100%);
+            border-left-color: var(--danger);
+        }
+        .insight-box h4 {
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            color: var(--text-primary);
+        }
+        .insight-list {
+            list-style: none;
+            padding-left: 0;
+        }
+        .insight-list li {
+            padding: 10px 0 10px 30px;
+            position: relative;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .insight-list li:before {
+            content: "▸";
+            position: absolute;
+            left: 0;
+            color: var(--primary);
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        input[type="file"] { display: none; }
+        .manual-input {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(255, 0, 110, 0.02) 100%);
+            padding: 40px;
+            border-radius: 20px;
+            margin-top: 30px;
+            border: 1px solid var(--card-border);
+        }
+        .manual-input h3 {
+            color: var(--primary);
+            margin-bottom: 25px;
+            font-size: 1.3em;
+        }
+        .input-group {
+            margin-bottom: 25px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.95em;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            font-size: 1em;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(0, 0, 0, 0.2);
+            color: var(--text-primary);
+        }
+        .input-group input::placeholder { color: var(--text-secondary); opacity: 0.6; }
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: rgba(0, 212, 255, 0.05);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+        }
+        .input-group input.error {
+            border-color: var(--danger);
+            background: rgba(255, 71, 87, 0.05);
+        }
+        .error-message {
+            color: var(--danger);
+            font-size: 0.85em;
+            margin-top: 5px;
+            display: none;
+        }
+        .error-message.show { display: block; }
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+        .reset-btn {
+            background: linear-gradient(135deg, rgba(255, 0, 110, 0.3) 0%, rgba(255, 0, 110, 0.2) 100%);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            padding: 12px 25px;
+            border-radius: 25px;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        .reset-btn:hover {
+            background: linear-gradient(135deg, var(--accent), rgba(255, 0, 110, 0.4));
+            color: white;
+            box-shadow: 0 0 15px rgba(255, 0, 110, 0.3);
+        }
+        .creator-section {
+            padding: 40px;
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, rgba(255, 0, 110, 0.05) 100%);
+            border-top: 1px solid var(--card-border);
+            border-bottom: 1px solid var(--card-border);
+        }
+        .creator-card {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            max-width: 600px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .creator-card:hover {
+            box-shadow: 0 0 40px rgba(0, 212, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            transform: translateY(-3px);
+            border-color: var(--primary);
+        }
+        .creator-info {
+            flex: 1;
+            text-align: center;
+        }
+        .creator-info h3 {
+            color: var(--primary);
+            font-size: 1.5em;
+            margin-bottom: 5px;
+            font-weight: 700;
+        }
+        .creator-title {
+            color: var(--text-secondary);
+            font-size: 0.95em;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+        .creator-contacts {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+        .contact-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--primary);
+            text-decoration: none;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            width: fit-content;
+        }
+        .contact-link:hover {
+            color: var(--accent);
+            gap: 12px;
+        }
+        .contact-link::before {
+            content: '→';
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .contact-link:hover::before {
+            opacity: 1;
+        }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            background: rgba(0, 0, 0, 0.3);
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            border-top: 1px solid var(--card-border);
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ FinAlizer</h1>
+            <p>Advanced Financial Statement Analysis Platform</p>
+            <span class="badge">🔐 100% Privacy • No Servers • Open Source</span>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('upload')">📤 Upload</button>
+            <button class="tab disabled" id="dataTab" onclick="switchTab('data')">📊 Data</button>
+            <button class="tab disabled" id="ratiosTab" onclick="switchTab('ratios')">📈 Ratios</button>
+            <button class="tab disabled" id="insightsTab" onclick="switchTab('insights')">💡 Insights</button>
+        </div>
+
+        <div class="content">
+            <div id="uploadContent" class="tab-content active">
+                <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                    <h2>Upload PDF Financial Statement</h2>
+                    <p style="color: var(--text-secondary); margin: 15px 0;">Click to browse or drag & drop</p>
+                    <input type="file" id="fileInput" accept=".pdf" onchange="handleFileUpload(event)">
+                </div>
+
+                <div style="text-align: center; margin: 40px 0; color: var(--text-secondary); font-weight: 600;">─── OR ───</div>
+
+                <div class="manual-input">
+                    <h3>📝 Manual Data Entry</h3>
+                    <div class="data-grid">
+                        <div>
+                            <h4 style="margin-bottom: 15px; color: var(--primary);">Balance Sheet</h4>
+                            <div class="input-group"><label>Total Assets ($)</label><input type="number" id="totalAssets" placeholder="7900000" min="0"></div>
+                            <div class="input-group"><label>Total Liabilities ($)</label><input type="number" id="totalLiabilities" placeholder="4900000" min="0"></div>
+                            <div class="input-group"><label>Shareholders' Equity ($)</label><input type="number" id="equity" placeholder="3000000" min="0"></div>
+                            <hr style="border: none; border-top: 1px solid var(--card-border); margin: 15px 0;">
+                            <h5 style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 10px;">Current Assets (Optional - auto-calculated if provided)</h5>
+                            <div class="input-group"><label style="font-size: 0.9em;">Cash & Equivalents ($)</label><input type="number" id="cash" placeholder="1350000" min="0"></div>
+                            <div class="input-group"><label style="font-size: 0.9em;">Accounts Receivable ($)</label><input type="number" id="ar" placeholder="920000" min="0"></div>
+                            <div class="input-group"><label style="font-size: 0.9em;">Inventories ($)</label><input type="number" id="inventory" placeholder="720000" min="0"></div>
+                            <hr style="border: none; border-top: 1px solid var(--card-border); margin: 15px 0;">
+                            <h5 style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 10px;">Current Liabilities (Optional)</h5>
+                            <div class="input-group"><label style="font-size: 0.9em;">Short-term Borrowings ($)</label><input type="number" id="stBorrowings" placeholder="1200000" min="0"></div>
+                            <div class="input-group"><label style="font-size: 0.9em;">Accounts Payable ($)</label><input type="number" id="ap" placeholder="950000" min="0"></div>
+                        </div>
+                        <div>
+                            <h4 style="margin-bottom: 15px; color: var(--primary);">Income Statement</h4>
+                            <div class="input-group"><label>Revenue ($)</label><input type="number" id="revenue" placeholder="9500000" min="0"></div>
+                            <div class="input-group"><label>Cost of Goods Sold ($)</label><input type="number" id="cogs" placeholder="5700000" min="0"></div>
+                            <div class="input-group"><label>Operating Expenses ($)</label><input type="number" id="opex" placeholder="1900000" min="0"></div>
+                            <div class="input-group"><label>Net Income ($)</label><input type="number" id="netIncome" placeholder="1220000"></div>
+                        </div>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn" onclick="processManualData()" style="flex: 1; min-width: 200px;">Analyze Financial Data</button>
+                        <button class="reset-btn" onclick="resetForm()">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="dataContent" class="tab-content"><div id="financialDataDisplay"></div></div>
+            <div id="ratiosContent" class="tab-content"><div id="ratiosDisplay"></div></div>
+            <div id="insightsContent" class="tab-content"><div id="insightsDisplay"></div></div>
+        </div>
+
+        <div class="creator-section">
+            <div class="creator-card">
+                <div class="creator-info">
+                    <h3>Dev Sadaiya</h3>
+                    <p class="creator-title">Creator & Developer</p>
+                    <div class="creator-contacts">
+                        <a href="mailto:sadaiyadev@gmail.com" class="contact-link">📧 sadaiyadev@gmail.com</a>
+                        <a href="https://www.linkedin.com/in/dev-sadaiya-963b53219/" target="_blank" class="contact-link">💼 LinkedIn Profile</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            No data stored or transmitted
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        let financialData = null; 
+        let ratios = null; 
+        let tesseractWorker = null;
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(tabName + 'Content').classList.add('active');
+        }
+
+        function enableTabs() {
+            document.getElementById('dataTab').classList.remove('disabled');
+            document.getElementById('ratiosTab').classList.remove('disabled');
+            document.getElementById('insightsTab').classList.remove('disabled');
+            const exportBtn = document.getElementById('exportBtn');
+            if (exportBtn) exportBtn.disabled = false;
+        }
+
+        function validateInput(value, min = 0) {
+            const num = parseFloat(value);
+            if (isNaN(num) || num < min) return null;
+            return num;
+        }
+
+        function parseNumberString(s) { 
+            return (window.finUtils && window.finUtils.parseNumberString) ? window.finUtils.parseNumberString(s) : 0; 
+        }
+
+        function metricToProgress(k, v, u) { 
+            return (window.finUtils && window.finUtils.metricToProgress) ? window.finUtils.metricToProgress(k, v, u) : 0; 
+        }
+
+        async function ensureTesseractWorker() {
+            if (tesseractWorker) return tesseractWorker;
+            try {
+                tesseractWorker = Tesseract.createWorker({ logger: m => { 
+                    const status = document.getElementById('loadingStatus'); 
+                    if (status && m && m.status) status.textContent = `OCR: ${m.status} ${Math.round((m.progress||0)*100)}%`; 
+                } });
+                await tesseractWorker.load(); 
+                await tesseractWorker.loadLanguage('eng'); 
+                await tesseractWorker.initialize('eng'); 
+                return tesseractWorker;
+            } catch (e) { 
+                console.error('Tesseract worker init failed', e); 
+                tesseractWorker = null; 
+                return null; 
+            }
+        }
+
+        async function ocrPdfPage(page) {
+            try {
+                const viewport = page.getViewport({ scale: 2 }); 
+                const canvas = document.createElement('canvas'); 
+                canvas.width = Math.floor(viewport.width); 
+                canvas.height = Math.floor(viewport.height); 
+                const ctx = canvas.getContext('2d'); 
+                await page.render({ canvasContext: ctx, viewport }).promise; 
+                const worker = await ensureTesseractWorker(); 
+                if (!worker) return ''; 
+                const { data: { text } } = await worker.recognize(canvas); 
+                return text || '';
+            } catch (e) {
+                console.error('OCR error:', e);
+                return '';
+            }
+        }
+
+        function showLoading(containerId, message = 'Processing financial statement...') { 
+            const container = document.getElementById(containerId); 
+            if (!container) return; 
+            hideLoading(containerId); 
+            const loading = document.createElement('div'); 
+            loading.className = 'loading'; 
+            loading.innerHTML = `<div class="spinner"></div><p id="loadingStatus">${message}</p>`; 
+            container.appendChild(loading); 
+        }
+
+        function updateLoadingStatus(containerId, message) { 
+            const status = document.querySelector(`#${containerId} #loadingStatus`); 
+            if (status) status.textContent = message; 
+        }
+
+        function hideLoading(containerId) { 
+            const loading = document.querySelector(`#${containerId} .loading`); 
+            if (loading) loading.remove(); 
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0]; 
+            if (!file) return; 
+            showLoading('uploadContent', 'Preparing PDF...');
+            try {
+                const arrayBuffer = await file.arrayBuffer(); 
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise; 
+                let fullText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    updateLoadingStatus('uploadContent', `Reading page ${i} of ${pdf.numPages}...`);
+                    const page = await pdf.getPage(i); 
+                    const textContent = await page.getTextContent(); 
+                    const pageText = textContent && textContent.items ? textContent.items.map(item => item.str).join(' ') : '';
+                    if (!pageText || pageText.trim().length < 150) { 
+                        updateLoadingStatus('uploadContent', `Page ${i}: running OCR...`); 
+                        const ocrText = await ocrPdfPage(page); 
+                        fullText += (ocrText || '') + '\n'; 
+                    } else { 
+                        fullText += pageText + '\n'; 
+                    }
+                }
+                parseFinancialData(fullText || ''); 
+                hideLoading('uploadContent'); 
+                enableTabs(); 
+                switchTab('data');
+            } catch (error) { 
+                console.error('Error processing PDF:', error); 
+                alert('Error processing PDF. Please try manual entry instead.'); 
+                hideLoading('uploadContent'); 
+            }
+        }
+
+        function extractNumberFromText(text, regexes) { 
+            for (const r of regexes) { 
+                const m = text.match(r); 
+                if (m && m[1]) { 
+                    return parseNumberString(m[1]); 
+                } 
+            } 
+            return 0; 
+        }
+
+        function parseFinancialData(text) {
+            try {
+                const t = text || '';
+                financialData = {
+                    totalAssets: extractNumberFromText(t, [/Total Assets[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /Assets[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    totalLiabilities: extractNumberFromText(t, [/Total Liabilities[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /Liabilities[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    equity: extractNumberFromText(t, [/Shareholders?.? Equity[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /Equity[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    currentAssets: extractNumberFromText(t, [/Current Assets[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    currentLiabilities: extractNumberFromText(t, [/Current Liabilities[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    revenue: extractNumberFromText(t, [/Revenue[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /Sales[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    cogs: extractNumberFromText(t, [/Cost of (?:Goods )?Sold[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /COGS[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    opex: extractNumberFromText(t, [/Operating Expenses[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]),
+                    netIncome: extractNumberFromText(t, [/Net Income[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i])
+                };
+                
+                // Calculate Current Assets from individual line items if not found
+                if (financialData.currentAssets === 0) {
+                    const cash = extractNumberFromText(t, [/Cash\s*(?:&|and)?\s*Cash Equivalents[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /Cash[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]);
+                    const ar = extractNumberFromText(t, [/Accounts Receivable[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]);
+                    const inventory = extractNumberFromText(t, [/Inventories?[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]);
+                    
+                    if (cash > 0 || ar > 0 || inventory > 0) {
+                        financialData.currentAssets = cash + ar + inventory;
+                    }
+                }
+                
+                // Calculate Current Liabilities from individual line items if not found
+                if (financialData.currentLiabilities === 0) {
+                    const stBorrowings = extractNumberFromText(t, [/Short-term Borrowings[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i, /Current Borrowings[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]);
+                    const ap = extractNumberFromText(t, [/Accounts Payable[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]);
+                    
+                    if (stBorrowings > 0 || ap > 0) {
+                        financialData.currentLiabilities = stBorrowings + ap;
+                    }
+                }
+                
+                if ((!financialData.equity || financialData.equity === 0) && financialData.totalAssets > 0 && financialData.totalLiabilities > 0) {
+                    financialData.equity = financialData.totalAssets - financialData.totalLiabilities;
+                }
+                displayFinancialData(); 
+                calculateRatios();
+            } catch (err) { 
+                console.error('parseFinancialData error', err); 
+            }
+        }
+
+        function resetForm() {
+            document.querySelectorAll('.manual-input input').forEach(inp => inp.value = '');
+            document.querySelectorAll('.manual-input input').forEach(inp => inp.classList.remove('error'));
+            financialData = null;
+            ratios = null;
+            document.getElementById('financialDataDisplay').innerHTML = '';
+            document.getElementById('ratiosDisplay').innerHTML = '';
+            document.getElementById('insightsDisplay').innerHTML = '';
+            document.getElementById('dataTab').classList.add('disabled');
+            document.getElementById('ratiosTab').classList.add('disabled');
+            document.getElementById('insightsTab').classList.add('disabled');
+            document.getElementById('exportBtn').disabled = true;
+            switchTab('upload');
+        }
+
+        function processManualData() {
+            const inputs = {
+                totalAssets: validateInput(document.getElementById('totalAssets').value),
+                totalLiabilities: validateInput(document.getElementById('totalLiabilities').value),
+                equity: validateInput(document.getElementById('equity').value),
+                revenue: validateInput(document.getElementById('revenue').value),
+                cogs: validateInput(document.getElementById('cogs').value),
+                opex: validateInput(document.getElementById('opex').value),
+                netIncome: parseFloat(document.getElementById('netIncome').value) || 0
+            };
+
+            // Calculate current assets from individual items
+            const cash = validateInput(document.getElementById('cash').value) || 0;
+            const ar = validateInput(document.getElementById('ar').value) || 0;
+            const inventory = validateInput(document.getElementById('inventory').value) || 0;
+            inputs.currentAssets = (cash + ar + inventory) || 0;
+
+            // Calculate current liabilities from individual items
+            const stBorrowings = validateInput(document.getElementById('stBorrowings').value) || 0;
+            const ap = validateInput(document.getElementById('ap').value) || 0;
+            inputs.currentLiabilities = (stBorrowings + ap) || 0;
+
+            let hasError = false;
+            const requiredFields = ['totalAssets', 'totalLiabilities', 'revenue'];
+            
+            for (const field of requiredFields) {
+                const domElement = document.getElementById(field);
+                if (inputs[field] === null) {
+                    domElement.classList.add('error');
+                    hasError = true;
+                } else {
+                    domElement.classList.remove('error');
+                }
+            }
+
+            if (hasError) {
+                alert('Please enter valid values for Total Assets, Total Liabilities, and Revenue');
+                return;
+            }
+
+            financialData = inputs;
+            displayFinancialData(); 
+            calculateRatios(); 
+            enableTabs(); 
+            switchTab('data');
+        }
+
+        function displayFinancialData() {
+            const html = `
+                <h2 style="margin-bottom: 30px; color: var(--primary);">📊 Extracted Financial Data</h2>
+                <div class="data-grid">
+                    <div class="data-card">
+                        <h3>💰 Balance Sheet</h3>
+                        <div class="data-row"><span>Total Assets</span><strong>${formatCurrency(financialData.totalAssets)}</strong></div>
+                        <div class="data-row"><span>Total Liabilities</span><strong>${formatCurrency(financialData.totalLiabilities)}</strong></div>
+                        <div class="data-row"><span>Shareholders' Equity</span><strong>${formatCurrency(financialData.equity)}</strong></div>
+                        <div class="data-row"><span>Current Assets</span><strong>${formatCurrency(financialData.currentAssets)}</strong></div>
+                        <div class="data-row"><span>Current Liabilities</span><strong>${formatCurrency(financialData.currentLiabilities)}</strong></div>
+                    </div>
+                    <div class="data-card">
+                        <h3>📈 Income Statement</h3>
+                        <div class="data-row"><span>Revenue</span><strong>${formatCurrency(financialData.revenue)}</strong></div>
+                        <div class="data-row"><span>Cost of Goods Sold</span><strong>${formatCurrency(financialData.cogs)}</strong></div>
+                        <div class="data-row"><span>Operating Expenses</span><strong>${formatCurrency(financialData.opex)}</strong></div>
+                        <div class="data-row"><span>Net Income</span><strong style="font-size: 1.2em; color: ${financialData.netIncome > 0 ? 'var(--success)' : 'var(--danger)'}; text-shadow: 0 0 10px ${financialData.netIncome > 0 ? 'rgba(0, 208, 132, 0.5)' : 'rgba(255, 71, 87, 0.5)'}">${formatCurrency(financialData.netIncome)}</strong></div>
+                    </div>
+                </div>
+                ${(financialData.currentAssets > 0 || financialData.currentLiabilities > 0) && financialData.currentAssets !== extractNumberFromText('Current Assets', [/Current Assets[:\s]+\$?([\d,\.\-\(\)kmbin]+)/i]) ? '<div style="margin-top: 20px; padding: 15px; background: rgba(0, 212, 255, 0.1); border-left: 3px solid var(--primary); border-radius: 10px; font-size: 0.9em; color: var(--text-secondary);"><strong>ℹ️ Note:</strong> Current Assets and Liabilities were calculated from individual line items.</div>' : ''}
+            `;
+            document.getElementById('financialDataDisplay').innerHTML = html;
+        }
+
+        function calculateRatios() {
+            const d = financialData;
+            ratios = {
+                roe: (d.equity !== 0) ? (d.netIncome / d.equity) * 100 : null,
+                roa: (d.totalAssets !== 0) ? (d.netIncome / d.totalAssets) * 100 : null,
+                currentRatio: (d.currentLiabilities !== 0) ? (d.currentAssets / d.currentLiabilities) : null,
+                debtToEquity: (d.equity !== 0) ? (d.totalLiabilities / d.equity) : null,
+                grossMargin: (d.revenue !== 0) ? ((d.revenue - d.cogs) / d.revenue) * 100 : null,
+                operatingMargin: (d.revenue !== 0) ? ((d.revenue - d.cogs - d.opex) / d.revenue) * 100 : null,
+                netMargin: (d.revenue !== 0) ? (d.netIncome / d.revenue) * 100 : null,
+                debtRatio: (d.totalAssets !== 0) ? (d.totalLiabilities / d.totalAssets) * 100 : null
+            };
+            displayRatios(); 
+            generateInsights();
+        }
+
+        function displayRatios() {
+            const htmlHeader = `<h2 style="margin-bottom: 30px; color: var(--primary);">📈 Financial Ratios Analysis</h2>`;
+            const cards = [];
+            cards.push(createRatioCard('Return on Equity (ROE)', 'roe', ratios.roe, '%', 15, 10, false));
+            cards.push(createRatioCard('Return on Assets (ROA)', 'roa', ratios.roa, '%', 5, 2, false));
+            cards.push(createRatioCard('Current Ratio', 'currentRatio', ratios.currentRatio, '', 1.5, 1, false));
+            cards.push(createRatioCard('Debt-to-Equity Ratio', 'debtToEquity', ratios.debtToEquity, '', 1, 2, true));
+            cards.push(createRatioCard('Gross Profit Margin', 'grossMargin', ratios.grossMargin, '%', 40, 20, false));
+            cards.push(createRatioCard('Operating Margin', 'operatingMargin', ratios.operatingMargin, '%', 15, 5, false));
+            cards.push(createRatioCard('Net Profit Margin', 'netMargin', ratios.netMargin, '%', 10, 5, false));
+            cards.push(createRatioCard('Debt Ratio', 'debtRatio', ratios.debtRatio, '%', 50, 70, true));
+            document.getElementById('ratiosDisplay').innerHTML = htmlHeader + cards.join('');
+        }
+
+        function createRatioCard(name, key, value, unit, goodThreshold, warningThreshold, inverse) {
+            const displayValue = (value === null) ? 'N/A' : `${value.toFixed(2)}${unit}`;
+            let status = 'good';
+            if (value === null) status = 'warning';
+            else if (inverse) {
+                if (value > warningThreshold) status = 'bad';
+                else if (value > goodThreshold) status = 'warning';
+            } else {
+                if (value < warningThreshold) status = 'bad';
+                else if (value < goodThreshold) status = 'warning';
+            }
+            const percentage = metricToProgress(key, value, unit === '%' ? '%' : '');
+            return `
+                <div class="ratio-card">
+                    <div class="ratio-header">
+                        <span style="font-weight: 600; font-size: 1.1em;">${name}</span>
+                        <span class="ratio-value ${status}">${displayValue}</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${percentage}%"></div>
+                    </div>
+                    <small style="color: var(--text-secondary); margin-top: 5px; display: block;">
+                        ${getRatioBenchmark(name, goodThreshold, warningThreshold, inverse)}
+                    </small>
+                </div>
+            `;
+        }
+
+        function getRatioBenchmark(name, good, warning, inverse) {
+            if (inverse) return `Benchmark: lower is better; < ${good} excellent, > ${warning} needs attention`;
+            return `Benchmark: > ${good} is excellent, < ${warning} needs attention`;
+        }
+
+        function generateInsights() {
+            const warnings = []; 
+            const strengths = [];
+            
+            if (ratios.roe !== null) {
+                if (ratios.roe >= 15) strengths.push('Strong return on equity indicates efficient use of shareholder capital');
+                else if (ratios.roe < 10) warnings.push('Low ROE suggests the company may not be generating sufficient returns for shareholders');
+            }
+            if (ratios.roa !== null) {
+                if (ratios.roa >= 5) strengths.push('Healthy return on assets shows effective asset utilization');
+                else if (ratios.roa < 2) warnings.push('Low ROA indicates assets are not being used efficiently to generate profits');
+            }
+            if (ratios.currentRatio !== null) {
+                if (ratios.currentRatio >= 1.5) strengths.push('Strong liquidity position with good current ratio');
+                else if (ratios.currentRatio < 1) warnings.push('⚠️ Critical: Current ratio below 1 indicates potential liquidity issues');
+            }
+            if (ratios.debtToEquity !== null) {
+                if (ratios.debtToEquity <= 1) strengths.push('Conservative debt levels provide financial stability');
+                else if (ratios.debtToEquity > 2) warnings.push('⚠️ High debt-to-equity ratio suggests elevated financial risk');
+            }
+            if (ratios.grossMargin !== null) {
+                if (ratios.grossMargin >= 40) strengths.push('Excellent gross margins indicate strong pricing power');
+                else if (ratios.grossMargin < 20) warnings.push('Low gross margins may limit profitability and flexibility');
+            }
+            if (ratios.netMargin !== null) {
+                if (ratios.netMargin >= 10) strengths.push('Healthy net profit margins show efficient operations');
+                else if (ratios.netMargin < 5) warnings.push('Thin net margins leave little room for operational challenges');
+            }
+            
+            let overallHealth = 'Moderate'; 
+            let healthColor = 'var(--warning)'; 
+            const goodCount = strengths.length; 
+            const badCount = warnings.length;
+            
+            if (goodCount > badCount + 2) { overallHealth = 'Strong'; healthColor = 'var(--success)'; }
+            else if (badCount > goodCount + 1) { overallHealth = 'Needs Attention'; healthColor = 'var(--danger)'; }
+            
+            const html = `
+                <div style="background: linear-gradient(135deg, ${healthColor}22 0%, ${healthColor}11 100%); padding: 30px; border-radius: 15px; margin-bottom: 30px; border: 1px solid var(--card-border);">
+                    <h2 style="color: ${healthColor}; margin-bottom: 10px;">Overall Financial Health: ${overallHealth}</h2>
+                    <p style="font-size: 1.1em; color: var(--text-secondary);">Based on the analyzed financial ratios, this company shows ${overallHealth.toLowerCase()} financial performance with ${goodCount} positive indicators and ${badCount} areas of concern.</p>
+                </div>
+                ${strengths.length > 0 ? `<div class="insight-box"><h4>✅ Key Strengths</h4><ul class="insight-list">${strengths.map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
+                ${warnings.length > 0 ? `<div class="insight-box warning"><h4>⚠️ Areas of Concern</h4><ul class="insight-list">${warnings.map(w => `<li>${w}</li>`).join('')}</ul></div>` : ''}
+                <div class="insight-box"><h4>💡 Recommendations</h4><ul class="insight-list">${getRecommendations().map(r => `<li>${r}</li>`).join('')}</ul></div>
+                <div style="background: rgba(0, 212, 255, 0.05); padding: 20px; border-radius: 10px; margin-top: 30px; border: 1px solid var(--card-border);"><p style="font-size: 0.9em; color: var(--text-secondary);"><strong>Disclaimer:</strong> This analysis is generated using standard financial benchmarks and should be used as a preliminary assessment. Consult professionals for investment decisions.</p></div>
+            `;
+            document.getElementById('insightsDisplay').innerHTML = html;
+        }
+
+        function getRecommendations() {
+            const recs = [];
+            if (ratios.currentRatio !== null && ratios.currentRatio < 1.5) recs.push('Consider improving working capital management to enhance liquidity');
+            if (ratios.debtToEquity !== null && ratios.debtToEquity > 1.5) recs.push('Evaluate debt reduction strategies to lower financial risk');
+            if (ratios.netMargin !== null && ratios.netMargin < 10) recs.push('Focus on cost optimization and operational efficiency improvements');
+            if (ratios.roe !== null && ratios.roe < 15 && ratios.netMargin !== null && ratios.netMargin > 5) recs.push('Explore opportunities to improve capital efficiency and asset turnover');
+            if (ratios.grossMargin !== null && ratios.grossMargin >= 30 && ratios.netMargin !== null && ratios.netMargin < 10) recs.push('Review operating expenses - good gross margins suggest operational costs may be too high');
+            return recs.length > 0 ? recs : ['Continue monitoring key financial metrics and maintain current performance levels'];
+        }
+
+        function formatCurrency(value) { 
+            return new Intl.NumberFormat('en-US', { 
+                style: 'currency', 
+                currency: 'USD', 
+                minimumFractionDigits: 0, 
+                maximumFractionDigits: 0 
+            }).format(value || 0); 
+        }
+
+        function exportJSON() {
+            const out = { financialData, ratios, generatedAt: new Date().toISOString() };
+            const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(out, null, 2));
+            const dl = document.createElement('a');
+            dl.setAttribute('href', dataStr);
+            dl.setAttribute('download', 'financial_analysis.json');
+            document.body.appendChild(dl);
+            dl.click();
+            dl.remove();
+        }
+
+        window.addEventListener('beforeunload', async () => { 
+            if (tesseractWorker) { 
+                try { await tesseractWorker.terminate(); } catch(e){}
+            } 
+        });
+    </script>
+</body>
+</html>
